@@ -14,6 +14,7 @@ const db = mongoClient.db("my-wallet-db");
 const users = db.collection("users");
 const sessions = db.collection("sessions");
 
+
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -61,7 +62,7 @@ app.post('/sign-up', async (req, res) => {
 
     const passwordHash = bcrypt.hashSync(password, 10);
 
-    await users.insertOne({ name, email, password: passwordHash });
+    await users.insertOne({ name, email, password: passwordHash, transactions: [] });
 
     return res.sendStatus(201);
 });
@@ -85,6 +86,121 @@ app.post('/sign-in', async (req, res) => {
 
     return res.sendStatus(401);
 });
+
+app.post('/incoming', async (req, res) => {
+    const { authorization } = req.headers;
+    const { value, description } = req.body;
+    const token = authorization?.replace("Bearer ", "");
+
+    if (!token) {
+        console.log(authorization)
+        return res.sendStatus(401);
+    }
+
+    const { error } = incomingTrasactionSchema.validate(req.body, { abortEarly: false });
+
+    if (error) {
+        const errors = error.details.map((detail) => detail.message);
+        return res.status(422).send(errors);
+    }
+
+    try {
+        const session = await sessions.findOne({ token });
+        const user = await users.findOne({ _id: session.userId });
+
+        const transaction = await users.updateOne({ _id: user._id }, {
+            $set:
+            {
+                transactions: [
+                    ...user.transactions,
+                    {
+                        type: 'incoming',
+                        value,
+                        description,
+                        date
+                    }
+                ]
+            }
+        });
+
+        if (transaction.modifiedCount === 1) {
+            return res.sendStatus(200);
+        }
+
+
+        return res.sendStatus(404);
+    } catch (error) {
+        console.log(error);
+        return res.sendStatus(500);
+    }
+});
+
+app.post('/outgoing', async (req, res) => {
+    const { authorization } = req.headers;
+    const { value, description } = req.body;
+    const token = authorization?.replace("Bearer ", "");
+
+    if (!token) {
+        console.log(authorization)
+        return res.sendStatus(401);
+    }
+
+    const { error } = outgoingTrasactionSchema.validate(req.body, { abortEarly: false });
+
+    if (error) {
+        const errors = error.details.map((detail) => detail.message);
+        return res.status(422).send(errors);
+    }
+
+    try {
+        const session = await sessions.findOne({ token });
+        const user = await users.findOne({ _id: session.userId });
+
+        const transaction = await users.updateOne({ _id: user._id }, {
+            $set:
+            {
+                transactions: [
+                    ...user.transactions,
+                    {
+                        type: 'outgoing',
+                        value,
+                        description,
+                        date
+                    }
+                ]
+            }
+        });
+
+        if (transaction.modifiedCount === 1) {
+            return res.sendStatus(200);
+        }
+
+
+        return res.sendStatus(404);
+    } catch (error) {
+        console.log(error);
+        return res.sendStatus(500);
+    }
+});
+
+app.get(('/'), async (req, res) => {
+    const { authorization } = req.headers;
+    const token = authorization?.replace("Bearer ", "");
+
+    if (!token) {
+        return res.sendStatus(401);
+    }
+
+    try {
+        const session = await sessions.findOne({ token });
+        const userData = await users.findOne({ _id: session.userId });
+
+        return res.status(200).send(userData);
+    } catch (error) {
+        console.log(error);
+        return res.sendStatus(404);
+    }
+})
 
 app.listen(5000, () => {
     console.log('Server is running on port: 5000');
